@@ -1,0 +1,278 @@
+#!/bin/sh
+## Usage: source runtest.sh [options]
+## 
+## This script allow developers to test their walnut
+## test local changes on any remote available host.
+##
+
+ERROR='\033[0;31m'
+WARN='\033[0;33m'
+INFO='\033[0;32m'
+STD='\033[0m'
+UPL='\033[0;35m'
+
+DEFAULT_TEST="test_exif_example.py"
+LOCK_PATH="/tmp/.testlock"
+HOST_REPO_PATH="~/one"
+
+host=""
+host_list="3 5 14 23 26"
+upl_test=""
+spec_file=""
+spec_host=""
+spec_branch="master"
+cmd=""
+local_path_fw=""
+
+log() {
+    echo -e "\033[0;36m[runtest]${STD} $2$1${STD}"
+    return 0
+}
+
+display_help() {
+    echo "Usage: source runtest.sh [-f [path]] [-n [host_number]] [-c [cmd]]"
+    echo ""
+    echo "Options:"
+    echo "   -h           Display this message."
+    echo ""
+    echo "   -n [0-26]    Host number to use. Example: -n 13 for host raspberrypi-oat13."
+    echo "                If not specified, the script will search for a free host"
+    echo "                on the network automatically."
+    echo ""
+    echo "   -f [path]    Path to a specific file to copy to host."
+    echo "                If not specified, the script will copy all diffs from"
+    echo "                /firmware/tests/walnut/ automatically."
+    echo ""
+    echo "   -c [cmd]     Command to execute on host. The command will be executed"
+    echo "                from /firmware/test/walnut/testcases/. "
+    echo "                If not specifed, basic_exif_example.py will run."
+    echo ""
+    echo "   -b [branch]  Branch to reset the host to."
+    echo "                If not specifed, host will reset to origin/master."
+    echo ""
+    echo ""
+    echo "   -fwlocal [FW local]  Path to install the FW build by your hand in raspberry."
+    echo "                If not specifed, no FW update will be played"
+    echo ""
+}
+
+##########################################
+# Launch ssh-agent if no agent is running.
+# Save agent config to tmp file to allow
+# use in multiple sessions.
+##########################################
+launch_ssh_agent() {
+    mkdir -p /home/$USER
+    log "Check for running ssh agent..." $INFO
+    ssh-add -l ~/.ssh/id_rsa &>/dev/null
+    if [ "$?" == 2 ]; then
+      test -r ~/.ssh-agent && eval "$(<~/.ssh-agent)" > /dev/null
+
+      ssh-add -l ~/.ssh/id_rsa &> /dev/null
+      if [ "$?" == 2 ]; then
+        log "No agent running, launching one..." $INFO
+        umask 066
+        ssh-agent -s > ~/.ssh-agent
+        eval "$(<~/.ssh-agent)"
+        ssh-add ~/.ssh/id_rsa
+        log "Agent launched." $INFO
+      fi
+    fi
+}
+
+##########################################
+# Get options from command line arguments
+##########################################
+get_options() {
+    [ $# -eq 0 ] && return 0
+    OPTIND=1
+    while getopts ":f:n:b:c:h:fwlocal" opt; do
+        case $opt in
+            f) spec_file="$OPTARG";;
+            b) spec_branch="$OPTARG";;
+            n) spec_host="$OPTARG";;
+            c) cmd="$OPTARG";;
+            fwlocal) local_path_fw="$OPTARG";;
+            h) display_help; return 1;;
+            :) log "Option -$OPTARG requires an argument." $ERROR; return 1;;
+            *) display_help; return 1;;
+        esac
+    done
+
+    return 0
+}
+
+##########################################
+# Verify that host is reachable then
+# copy local public key to host authorized
+# key (if not already there) to allow
+# future passwordless ssh connection.
+##########################################
+verify_and_handshake() {
+    local pubkey=$(cat ~/.ssh/id_rsa.pub)
+    local ping_flag
+
+    case $OSTYPE in
+        "cygwin") ping_flag='-n';;
+        "msys") ping_flag='-n';;
+        *) ping_flag='-c';;
+    esac
+
+    ping $ping_flag 1 "raspberrypi-oat$2" &> /dev/null
+    [ $? -eq 0 ] || return 1
+
+    ssh $1 "[ -z \"\$(grep \"$pubkey\" ~/.ssh/authorized_keys )\" ] \
+            && echo $pubkey >> ~/.ssh/authorized_keys;"
+
+    return 0
+}
+
+##########################################
+# If no specified host selected, search
+# for a free host on the network.
+##########################################
+get_free_host() {
+    [ "$spec_host" ] && host_list=$spec_host
+
+    for pi_nb in $host_list
+    do
+        tmp_host="pi@raspberrypi-oat$pi_nb"
+        log "Trying host [$tmp_host]..." $STD
+        if verify_and_handshake $tmp_host $pi_nb; then
+            log "Handshake with host [$tmp_host] successful." $INFO
+        else
+            log "Hostname [$tmp_host] could not be resolved." $WARN
+            continue
+        fi
+        if check_host_status $tmp_host; then
+            if ssh -q $tmp_host [ -d $HOST_REPO_PATH ]; then
+                log "Free host found. Test will run on [$tmp_host]" $INFO
+                host=$tmp_host
+                break
+            else
+                log "Host [$tmp_host] is missing the git repository." $WARN
+                continue
+            fi
+        else
+            log "Host [$tmp_host] is busy." $WARN
+            continue
+        fi
+    done
+}
+
+##########################################
+# Reset host repo to specified branch or
+# to origin/master if no branch specified.
+##########################################s
+reset_host_repo() {
+    ssh -q $host "cd ~/one/ && git fetch --all && git reset --hard origin/$spec_branch;"
+    [ $? -eq 0 ] && log "Host repo has been reset to $spec_branch" $INFO \
+                 || log "Host repo failed to reset to $spec_branch" $ERROR;
+
+    return $?
+}
+
+##########################################
+# If no specified file to sync, sync
+# all changes in the walnut/ directory
+# with the host repo.
+##########################################
+sync_files() {
+    local diff=$(git diff --name-only ..)
+
+    if [ "$local_path_fw" ]; then
+        files=$spec_file
+        local_toplevel="."
+        host_toplevel='~/one/firmware/tests/walnut/testcases'
+    else
+        files=$(echo $diff | tr " " "\n")
+        local_toplevel="$(git rev-parse --show-toplevel)"
+        host_toplevel=$HOST_REPO_PATH
+    fi
+    for filename in $files
+        do
+            [[ $filename == *test_* ]] && upl_test=$(basename $filename)
+            rsync -azh -e ssh $local_toplevel/$filename $host:$host_toplevel/$filename &> /dev/null
+            [ $? -ne 0 ] && log "Error while uploading file [$filename]" $ERROR && return 1
+            log "File [$filename] uploaded." $UPL
+        done
+
+    return 0
+}
+
+##########################################
+# Function to upload a local FW to raspberry 
+##########################################
+send_fw_to_raspb() {
+
+    files=$spec_file
+    local_toplevel="."
+    host_toplevel='~/one/firmware/tests/walnut/script'
+
+    rsync -azh -e ssh $local_toplevel/$filename $host:$host_toplevel/$filename &> /dev/null
+    [ $? -ne 0 ] && log "Error while uploading file [$filename]" $ERROR && return 1
+    log "File [$filename] uploaded." $UPL
+
+
+    return 0
+}
+
+
+##########################################
+# Execute specified command in the
+# testcases/ directory.
+# If no command is specified, the last
+# test uploaded is executed.
+# Otherwise, a default test is executed.
+##########################################
+run_test_on_host() {
+    if [ ! "$cmd" ]; then
+        if [ "$upl_test" ]; then
+            log "No command specified, executing last uploaded test: [$upl_test]" $INFO
+            cmd="py.test -s $upl_test"
+        else
+            log "No command specified and no test uploaded, executing default: $DEFAULT_TEST" $INFO
+            cmd="py.test -s $DEFAULT_TEST"
+        fi
+    fi
+    ssh -q $host "cd ~/one/firmware/tests/walnut/testcases/ && $cmd"
+
+    return $?
+}
+
+##########################################
+# Check the host is busy by searching
+# for the lockfile. If no lockfile found
+# , the host is free. If a lockfile is
+# found, check if the PID it contain
+# is running. If not, the host is free.
+##########################################
+check_host_status() {
+    ssh -q $1 [ -f $LOCK_PATH ]
+    if [ $? -eq 0 ]; then
+        pid=$(ssh -q $1 "cat $LOCK_PATH")
+        if ssh -q $1 [ -d "/proc/$pid" ]; then
+            return 1
+        else
+            ssh -q $1 "rm -f $LOCK_PATH"
+            return 0
+        fi
+    else
+        return 0
+    fi
+}
+
+main() {
+    [ "${BASH_SOURCE[0]}" = "$0" ] && log "Script must be sourced not run." $ERROR && return 1;
+
+    get_options "$@" || return 1
+    launch_ssh_agent
+
+    get_free_host
+    [ "$host" ] || return 1
+    reset_host_repo && sync_files && run_test_on_host
+
+    return $?
+}
+
+main "$@"
