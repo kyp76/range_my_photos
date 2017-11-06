@@ -1,6 +1,26 @@
 import os
+import sys
 
-path = "/cygdrive/c/Users/svandenbulcke/Code/Perso/range_my_photos/tests"
+# For EXIF reading
+head = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(os.path.join(head, 'exifread'))
+import exifread
+
+
+path = "/Users/svandenbulcke/Code/perso/range_my_photos/tests"
+
+
+def get_exif(image_filename, verbosity=None):
+    """Read the EXIF metadata of the specified image.
+
+        :param str image_filename: The filename of the image.
+        :param verbosity: None or a list of strings, permits to activate additional debug on particular sections.
+               Supported items: ['MakerNote']
+        :returns: dict -- A dictionnary containing the EXIFs.
+    """
+    with open(image_filename, 'rb') as f:
+        return exifread.process_file(f, verbosity=verbosity)
+
 
 def convert_bytes(num):
     """
@@ -30,7 +50,11 @@ def listFiles(path):
 mlist_dir = listFiles(path)
 
 listkey1 = mlist_dir.keys()
-print('keys are {}'.format(listkey1))
-print ('value of runtest.txt {}'.format((mlist_dir[listkey1[1]].get('path'))))
+print('mlist_dir is  {}'.format(listkey1[0]))
+pathImg = mlist_dir[listkey1[5]].get('path')
 
+#
+#print('keys are {}'.format(listkey1))
+#print ('path of {} is {}'.format(listkey1[0],(mlist_dir[listkey1[0]].get('path'))))
 
+print ('exif of {} is {}'.format(listkey1[5],get_exif(pathImg)))
