@@ -1,6 +1,8 @@
 import os
 import sys
 import re
+import collections
+import shutil
 
 # For EXIF reading
 head = os.path.dirname(os.path.realpath(__file__))
@@ -8,9 +10,11 @@ sys.path.append(os.path.join(head, 'exifread'))
 import exifread
 
 
-#path = "/Users/svandenbulcke/Code/perso/range_my_photos/tests"
-path = '/Users/svandenbulcke/Photo_need_to_rank'
+#originalPath = "/Users/svandenbulcke/Code/perso/range_my_photos/tests"
+#desitnationPath = originalPath
 
+originalPath = "/Users/svandenbulcke/Photo_need_to_rank"
+#desitnationPath = "/Users/svandenbulcke/Dropbox/PHOTO"
 
 def get_exif(image_filename, verbosity=None):
     """Read the EXIF metadata of the specified image.
@@ -35,7 +39,7 @@ def convert_bytes(num):
 
 
 def listFiles(path):
-    dictListFiles = {}
+    dictListFiles = collections.OrderedDict()
 
     for root, dirs, files in os.walk(path, topdown=False):
         for name in files:
@@ -54,37 +58,56 @@ def listFiles(path):
     return dictListFiles
 
 
-def extractTime(TimeOriginal):
-    TimeOriginalreformat = re.match('([0-9]{4}):([0-9]{2}):([0-9]{2}) ([0-9]{2}:[0-9]{2}:[0-9]{2})', TimeOriginal)
-    return TimeOriginalreformat.groups()
+def extractTime(timeOriginal):
+    if timeOriginal == 'Null':
+        return
+
+    timeOriginalreformat = re.match('([0-9]{4}):([0-9]{2}):([0-9]{2}) ([0-9]{2}:[0-9]{2}:[0-9]{2})', timeOriginal)
+    return timeOriginalreformat.groups()
+
+
+def printValueDictionnary(dictionnary,needValues):
+    for key in dictionnary.keys():
+        value = dictionnary.get(key).get(str(needValues))
+        print (key , value)
 
 
 
-mlist_dir = listFiles(path)
 
-listkey1 = mlist_dir.keys()
-print ('list of files present in my dico {}'.format(listkey1))
-
-
-#pathImg = mlist_dir[listkey1[5]].get('path')
-
-#TimeOriginal = get_exif(pathImg)['EXIF DateTimeOriginal']
-
-
-##TimeOriginalreformat = re.match('([0-9]{4}):([0-9]{2}):([0-9]{2}) ([0-9]{2}:[0-9]{2}:[0-9]{2})',str(TimeOriginal))
-
-###yearOfPhoto, monthOfPhoto, dayOfPhoto, hourOfPhoto = extractTime(str(TimeOriginal))
-
-
-print('full informations of dico are {}'.format(mlist_dir))
-#print ('path of {} is {}'.format(listkey1[0],(mlist_dir[listkey1[0]].get('path'))))
-
-#print ('exif of {} is {}'.format(listkey1[5],dictExifValue))
+def createdirectory(dictionnary):
+    for key in dictionnary.iterkeys():
+        value = extractTime(str(dictionnary.get(key).get("TimeOfPhoto")))
+        imagePath = dictionnary.get(key).get("path")
+        if value is not None:
+            createdPath = os.path.join(os.sep,desitnationPath,value[0],"_".join(value)[0:13])
+            if not os.path.exists(createdPath):
+                os.makedirs(createdPath)
+            try:
+                shutil.copy(imagePath,createdPath)
+            except:
+                print ("Error during copy file")
+                pass
 
 
-#TODO : methode to share information of dico folder , ext or folder , time .....
 
-#TODO : creation of directory depending of TimeOriginal
+
+mdictValuable = listFiles(originalPath)
+
+keyofDict = mdictValuable.keys()
+print ('list of files present in my dico {}'.format(keyofDict))
+#valueOfDict = mdictValuable.values()
+#print ('list of value present in my dico {}'.format(valueOfDict))
+
+#createdirectory(mdictValuable)
+printValueDictionnary(mdictValuable,"TimeOfPhoto")
+
+#TODO test inn real life
 
 #TODO argpass
+
+#TODO unit test
+
+#TODO update documentation and refactor
+
+
 
