@@ -3,6 +3,7 @@ import sys
 import re
 import collections
 import shutil
+from optparse import OptionParser
 
 # For EXIF reading
 head = os.path.dirname(os.path.realpath(__file__))
@@ -10,10 +11,18 @@ sys.path.append(os.path.join(head, 'exifread'))
 import exifread
 
 
-#originalPath = "/Users/svandenbulcke/Code/perso/range_my_photos/tests"
-#desitnationPath = originalPath
 
-originalPath = "/Users/svandenbulcke/Photo_need_to_rank"
+# Parser configuration
+parser = OptionParser(usage="usage: %prog [options]")
+parser.add_option("-p","--pathToAnalyze", type='string', action="store", dest="originalPath", help="path to anaylse")
+parser.add_option("-d","--destinationPath", type='string', action="store", dest="desitnationPath", help="Desitnation Path")
+(options, args) = parser.parse_args()
+
+
+originalPath = "/Users/svandenbulcke/Code/perso/range_my_photos/tests"
+desitnationPath = originalPath
+
+#originalPath = "/Users/svandenbulcke/Photo_need_to_rank"
 #desitnationPath = "/Users/svandenbulcke/Dropbox/PHOTO"
 
 def get_exif(image_filename, verbosity=None):
@@ -72,42 +81,49 @@ def printValueDictionnary(dictionnary,needValues):
         print (key , value)
 
 
+def createFolder(folder):
+    if not os.path.exists(folder):
+        os.makedirs(folder)
 
+def copyFile(imagePath,createdPath):
+    try:
+        print ("copy on progress")
+        shutil.copy(imagePath, createdPath)
+    except:
+        print ("Error during copy file")
+        pass
 
 def createdirectory(dictionnary):
     for key in dictionnary.iterkeys():
         value = extractTime(str(dictionnary.get(key).get("TimeOfPhoto")))
         imagePath = dictionnary.get(key).get("path")
         if value is not None:
-            createdPath = os.path.join(os.sep,desitnationPath,value[0],"_".join(value)[0:13])
-            if not os.path.exists(createdPath):
-                os.makedirs(createdPath)
-            try:
-                shutil.copy(imagePath,createdPath)
-            except:
-                print ("Error during copy file")
-                pass
+            createdPath = os.path.join(os.sep,desitnationPath,value[0],"_".join(value)[0:10])
+            createFolder(createdPath)
+            copyFile(imagePath,createdPath)
+
+        extentionFile = dictionnary.get(key).get("extension").lower()
+        if extentionFile.lower() in ["mov","ext"]:
+            desitnationPathForMovie = os.path.join(os.sep,desitnationPath,"MOVIE_ON_PHONE")
+            createFolder(desitnationPathForMovie)
+            copyFile(dictionnary.get(key).get("path"),desitnationPathForMovie)
 
 
 
+if __name__ == '__main__':
 
-mdictValuable = listFiles(originalPath)
+    mdictValuable = listFiles(originalPath)
 
-keyofDict = mdictValuable.keys()
-print ('list of files present in my dico {}'.format(keyofDict))
-#valueOfDict = mdictValuable.values()
-#print ('list of value present in my dico {}'.format(valueOfDict))
+    keyofDict = mdictValuable.keys()
+    print ('list of files present in my dico {}'.format(keyofDict))
+    #valueOfDict = mdictValuable.values()
+    #print ('list of value present in my dico {}'.format(valueOfDict))
 
-#createdirectory(mdictValuable)
-printValueDictionnary(mdictValuable,"TimeOfPhoto")
+    createdirectory(mdictValuable)
 
-#TODO test inn real life
+    #TODO unit test
 
-#TODO argpass
-
-#TODO unit test
-
-#TODO update documentation and refactor
+    #TODO update documentation and refactor
 
 
 
